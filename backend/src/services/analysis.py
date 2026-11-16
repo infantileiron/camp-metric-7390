@@ -23,3 +23,18 @@ def calculate(snapshot):
   old=baseline['result'];old_m=old['metric'];changes=[dict(field=k,before=old_m.get(k),after=m.get(k)) for k in ['version','name','numerator','denominator','numerator_mode','denominator_mode'] if old_m.get(k)!=m.get(k)]
   diff=dict(baseline_id=baseline['id'],previous_value=old['value'],current_value=value,delta=value-old['value'] if value is not None and old['value'] is not None else None,changed_fields=changes,same_date_window=snapshot['date_from']==baseline['date_from'] and snapshot['date_to']==baseline['date_to'],same_fact_checksum=hashlib.sha256(json.dumps(rows,sort_keys=True,ensure_ascii=False).encode()).hexdigest()==old['facts_checksum'])
  return dict(metric=m,rows=len(rows),numerator_rows=len(nr),denominator_rows=len(dr),numerator=numerator,denominator=denominator,value=value,undefined_reason='外层聚合分母为零' if value is None else '',groups=groups,diff=diff,facts_checksum=hashlib.sha256(json.dumps(rows,sort_keys=True,ensure_ascii=False).encode()).hexdigest(),checksum=hashlib.sha256(json.dumps(snapshot,sort_keys=True,ensure_ascii=False).encode()).hexdigest(),version=VERSION,method='先按日期和分子/分母各自授课方式过滤，再逐行计算白名单表达式，分别求和后相除；不是日比率简单平均。value为比值，页面乘100显示百分比。分母0保留null/undefined，不补零；过滤范围不同可能产生>100%或负比值，需人工核对口径。')
+RETRO_VERSION='camp-retro-rebuild-v1'
+def calculate_retro(m,rows,basis):
+ if not rows:raise ValueError('按该登记截止点重建后，所选日期窗内没有有效事实（作废不计入），请调整日期窗或截止点')
+ n_tree,d_tree=parse(m['numerator']),parse(m['denominator'])
+ nr=[r for r in rows if m['numerator_mode']=='全部' or r['mode']==m['numerator_mode']]
+ dr=[r for r in rows if m['denominator_mode']=='全部' or r['mode']==m['denominator_mode']]
+ numerator=sum(execute(n_tree,r) for r in nr);denominator=sum(execute(d_tree,r) for r in dr)
+ value=ratio(numerator,denominator)
+ days=[]
+ for day in sorted({r['day'] for r in rows}):
+  dnr=[r for r in nr if r['day']==day];ddr=[r for r in dr if r['day']==day]
+  n=sum(execute(n_tree,r) for r in dnr);d=sum(execute(d_tree,r) for r in ddr)
+  days.append(dict(day=day,rows=len([r for r in rows if r['day']==day]),numerator=n,denominator=d,value=ratio(n,d)))
+ frozen=dict(metric=m,facts=rows,basis=basis)
+ return dict(metric=m,basis=basis,rows=len(rows),numerator_rows=len(nr),denominator_rows=len(dr),numerator=numerator,denominator=denominator,value=value,undefined_reason='外层聚合分母为零' if value is None else '',days=days,facts=rows,facts_checksum=hashlib.sha256(json.dumps(rows,sort_keys=True,ensure_ascii=False).encode()).hexdigest(),checksum=hashlib.sha256(json.dumps(frozen,sort_keys=True,ensure_ascii=False).encode()).hexdigest(),version=RETRO_VERSION,method='按登记截止点回放修订账重建事实：新增/更正/恢复以登记值全量覆盖，作废不计入，跨日更正只保留最新业务日期行；再按业务日期与原口径表达式重算，分子分母各自过滤授课方式后合计相除，不是日比率简单平均。分母0保留null/undefined，不补零。')

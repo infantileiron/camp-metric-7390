@@ -38,3 +38,12 @@ class RunInput(BaseModel):
   if self.date_from>self.date_to:raise ValueError('开始日不得晚于结束日')
   return self
 class NoteInput(BaseModel):note:str=Field(min_length=8,max_length=2000)
+class RetrialInput(BaseModel):
+ metric_id:int=Field(gt=0)
+ date_from:date
+ date_to:date
+ cutoff_seq:Optional[int]=Field(default=None,ge=0)
+ @model_validator(mode='after')
+ def window(self):
+  if self.date_from>self.date_to:raise ValueError('开始日不得晚于结束日')
+  return self
